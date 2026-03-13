@@ -1,7 +1,7 @@
-"""Discrete-Event Network Simulator -- Streamlit web application.
+"""XPU-Fabric Simulator -- Streamlit web application.
 
-Interactive data center network simulator with configurable Leaf-Spine
-topology, ECMP/DLB routing, ECN/DCQCN congestion control, and LLM analysis.
+Scalable simulator for CLOS fabrics that evaluates ECMP hashing efficiency
+and adaptive load balancing under congestion-like traffic patterns.
 """
 
 import random
@@ -23,13 +23,13 @@ from simulator.workloads import all_to_all_workload, web_traffic_workload
 # -- Page configuration --
 
 st.set_page_config(
-    page_title="Data Center Network Simulator",
+    page_title="XPU-Fabric Simulator",
     page_icon="",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
-# -- Custom CSS for a polished look --
+# -- Custom CSS --
 
 st.markdown("""
 <style>
@@ -84,12 +84,12 @@ st.markdown("""
 # -- Sidebar controls --
 
 with st.sidebar:
-    st.markdown("### Network Topology")
+    st.markdown("### CLOS Fabric Topology")
     num_spines = st.select_slider(
         "Spine Switches",
         options=[2, 4, 8],
         value=4,
-        help="Number of spine switches in the fabric.",
+        help="Number of spine switches in the CLOS fabric.",
     )
     num_leaves = st.select_slider(
         "Leaf Switches",
@@ -98,23 +98,23 @@ with st.sidebar:
         help="Number of leaf (ToR) switches.",
     )
     gpus_per_leaf = st.select_slider(
-        "GPUs per Leaf",
+        "XPUs per Leaf",
         options=[4, 8, 16],
         value=4,
-        help="Number of GPU endpoints per leaf switch.",
+        help="Number of XPU endpoints per leaf switch.",
     )
 
     st.markdown("---")
     st.markdown("### Simulation Settings")
     routing_mode = st.selectbox(
         "Routing Mode",
-        ["ECMP", "Dynamic Load Balancing"],
-        help="ECMP uses hash-based path selection. DLB uses real-time queue depths.",
+        ["ECMP", "Adaptive Load Balancing"],
+        help="ECMP uses hash-based path selection. Adaptive LB uses real-time queue depths.",
     )
     workload_type = st.selectbox(
-        "Workload Type",
-        ["All-to-All AI Training", "Web Traffic"],
-        help="All-to-All simulates distributed training. Web Traffic is sparse and random.",
+        "Traffic Pattern",
+        ["All-to-All Collective", "Sparse Unicast"],
+        help="All-to-All simulates distributed training collectives. Sparse Unicast models request-response traffic.",
     )
     sim_duration = st.slider(
         "Simulation Ticks",
@@ -139,17 +139,17 @@ with st.sidebar:
 
 # -- Header --
 
-st.markdown('<div class="main-header">Data Center Network Simulator</div>', unsafe_allow_html=True)
+st.markdown('<div class="main-header">XPU-Fabric Simulator</div>', unsafe_allow_html=True)
 st.markdown(
     '<div class="sub-header">'
-    "Discrete-event simulation of Leaf-Spine fabrics with ECMP, DLB, and ECN/DCQCN congestion control"
+    "Evaluate ECMP hashing efficiency and adaptive load balancing across CLOS fabric topologies"
     "</div>",
     unsafe_allow_html=True,
 )
 
 
 def build_topology(num_spines, num_leaves, gpus_per_leaf, buffer_capacity):
-    """Construct the Leaf-Spine topology with GPU endpoints."""
+    """Construct the CLOS fabric topology with XPU endpoints."""
     spines = [
         Switch(switch_id=i, switch_type="spine", buffer_capacity=buffer_capacity, num_ports=num_leaves)
         for i in range(num_spines)
@@ -165,27 +165,25 @@ def build_topology(num_spines, num_leaves, gpus_per_leaf, buffer_capacity):
             gpus.append(GPU(gpu_id=gpu_id, leaf_id=leaf_id))
             gpu_id += 1
 
-    # Map GPU IDs to their leaf switch index.
     gpu_to_leaf = {gpu.gpu_id: gpu.leaf_id for gpu in gpus}
-
     return spines, leaves, gpus, gpu_to_leaf
 
 
 def run_simulation(num_spines, num_leaves, gpus_per_leaf, routing_mode,
                    workload_type, sim_duration, buffer_capacity):
-    """Execute the discrete-event simulation and return collected metrics."""
+    """Execute the fabric simulation and return collected telemetry."""
     spines, leaves, gpus, gpu_to_leaf = build_topology(
         num_spines, num_leaves, gpus_per_leaf, buffer_capacity
     )
     metrics = MetricsCollector()
     engine = EventLoop()
 
-    # Seed for reproducibility when using web traffic.
+    # Seed for reproducibility.
     random.seed(42)
 
     # Generate workload flows.
-    base_rate = 10.0 if workload_type == "All-to-All AI Training" else 5.0
-    if workload_type == "All-to-All AI Training":
+    base_rate = 10.0 if workload_type == "All-to-All Collective" else 5.0
+    if workload_type == "All-to-All Collective":
         flows = all_to_all_workload(gpus, base_rate=base_rate)
     else:
         flows = web_traffic_workload(gpus, base_rate=base_rate, density=0.15)
@@ -194,7 +192,7 @@ def run_simulation(num_spines, num_leaves, gpus_per_leaf, routing_mode,
         return None, None, None, "No flows generated. Try a different configuration."
 
     all_switches = spines + leaves
-    use_dlb = routing_mode == "Dynamic Load Balancing"
+    use_adaptive_lb = routing_mode == "Adaptive Load Balancing"
 
     # Run the simulation tick by tick.
     for tick in range(sim_duration):
@@ -203,7 +201,6 @@ def run_simulation(num_spines, num_leaves, gpus_per_leaf, routing_mode,
         # Each flow generates packets based on its current rate.
         for flow in flows:
             num_packets = max(1, int(flow.rate / len(flows) * 2 + 0.5))
-            # Scale packet generation to keep simulation tractable.
             num_packets = min(num_packets, 3)
 
             for _ in range(num_packets):
@@ -222,14 +219,13 @@ def run_simulation(num_spines, num_leaves, gpus_per_leaf, routing_mode,
                 flow.packets_sent += 1
                 metrics.total_packets_sent += 1
 
-        # Route each packet through the fabric.
+        # Route each packet through the CLOS fabric.
         for flow, pkt in packets_this_tick:
             src_leaf = leaves[pkt.src_leaf]
             dst_leaf = leaves[pkt.dst_leaf]
 
             # Intra-leaf traffic skips the spine layer.
             if pkt.src_leaf == pkt.dst_leaf:
-                # Deliver directly within the same leaf.
                 latency = 1.0 + src_leaf.queue_depth(0) * 0.1
                 flow.record_latency(latency)
                 metrics.record_latency(flow.flow_id, latency)
@@ -237,8 +233,7 @@ def run_simulation(num_spines, num_leaves, gpus_per_leaf, routing_mode,
                 continue
 
             # Select a spine uplink.
-            if use_dlb:
-                # Query real-time queue depths on each spine's port for this leaf.
+            if use_adaptive_lb:
                 queue_depths = {}
                 for spine_idx, spine in enumerate(spines):
                     queue_depths[spine_idx] = spine.queue_depth(pkt.src_leaf)
@@ -261,19 +256,19 @@ def run_simulation(num_spines, num_leaves, gpus_per_leaf, routing_mode,
                 pkt.ecn_marked = True
                 metrics.total_ecn_marks += 1
 
-            # Enqueue on the spine's port for the source leaf.
+            # Enqueue on the spine's ingress port.
             spine_port_in = pkt.src_leaf
             if not spine.enqueue(spine_port_in, pkt):
                 metrics.total_packets_dropped += 1
                 src_leaf.dequeue(uplink_port)
                 continue
 
-            # Check ECN at spine.
+            # Check ECN at spine ingress.
             if check_ecn(spine.queue_depth(spine_port_in), buffer_capacity):
                 pkt.ecn_marked = True
                 metrics.total_ecn_marks += 1
 
-            # Enqueue on the spine's output port toward the destination leaf.
+            # Enqueue on the spine's egress port toward the destination leaf.
             spine_port_out = pkt.dst_leaf
             if not spine.enqueue(spine_port_out, pkt):
                 metrics.total_packets_dropped += 1
@@ -281,7 +276,7 @@ def run_simulation(num_spines, num_leaves, gpus_per_leaf, routing_mode,
                 spine.dequeue(spine_port_in)
                 continue
 
-            # Check ECN at spine output.
+            # Check ECN at spine egress.
             if check_ecn(spine.queue_depth(spine_port_out), buffer_capacity):
                 pkt.ecn_marked = True
                 metrics.total_ecn_marks += 1
@@ -317,7 +312,7 @@ def run_simulation(num_spines, num_leaves, gpus_per_leaf, routing_mode,
                 for _ in range(drain_count):
                     sw.dequeue(port)
 
-        # Record per-tick metrics.
+        # Record per-tick telemetry.
         switch_data = []
         link_utils = []
         for sw in all_switches:
@@ -342,7 +337,7 @@ def run_simulation(num_spines, num_leaves, gpus_per_leaf, routing_mode,
 
 
 def create_charts(metrics, all_switches):
-    """Build Plotly charts from simulation metrics."""
+    """Build Plotly charts from simulation telemetry."""
     df = metrics.to_dataframe()
 
     chart_layout = dict(
@@ -360,10 +355,9 @@ def create_charts(metrics, all_switches):
 
     charts = {}
 
-    # 1. Link utilization over time (aggregate by switch).
+    # Link utilization over time (aggregate by switch).
     link_df = df[df["type"] == "link"].copy()
     if not link_df.empty:
-        # Extract switch name from link_name for aggregation.
         link_df["switch"] = link_df["link_name"].apply(lambda x: "_".join(x.split("_")[:-1]))
         agg = link_df.groupby(["tick", "switch"])["utilization"].mean().reset_index()
 
@@ -379,11 +373,10 @@ def create_charts(metrics, all_switches):
         fig_link.update_traces(line=dict(width=2))
         charts["link_util"] = fig_link
 
-    # 2. Queue depths over time (top switches by peak depth).
+    # Queue depths over time (top switches by peak depth).
     queue_df = df[df["type"] == "queue"].copy()
     if not queue_df.empty:
         agg_q = queue_df.groupby(["tick", "switch_name"])["queue_depth"].max().reset_index()
-        # Pick the top 8 most congested switches for readability.
         top_switches = (
             agg_q.groupby("switch_name")["queue_depth"]
             .max()
@@ -404,7 +397,7 @@ def create_charts(metrics, all_switches):
         fig_queue.update_traces(line=dict(width=2))
         charts["queue_depth"] = fig_queue
 
-    # 3. Tail latency (p99) over time.
+    # Tail latency (p99) over time.
     lat_df = metrics.latency_dataframe()
     if not lat_df.empty:
         fig_lat = px.line(
@@ -444,7 +437,7 @@ if run_button:
     if error:
         st.error(error)
     else:
-        # Summary metrics row.
+        # Summary telemetry cards.
         import json
         summary = json.loads(summary_json)
 
@@ -499,39 +492,39 @@ if run_button:
 
         st.markdown("---")
 
-        # AI analysis panel.
-        st.markdown("### NetOps AI Analysis")
-        with st.spinner("Analyzing metrics..."):
+        # LLM analysis panel.
+        st.markdown("### Telemetry Analysis")
+        with st.spinner("Analyzing telemetry..."):
             analysis = analyze_metrics(summary_json, routing_mode)
         st.markdown(
             f'<div class="analysis-box">{analysis}</div>',
             unsafe_allow_html=True,
         )
 
-        # Expandable raw metrics.
-        with st.expander("Raw Simulation Metrics (JSON)"):
+        # Expandable raw telemetry.
+        with st.expander("Raw Telemetry Log (JSON)"):
             st.code(summary_json, language="json")
 
 else:
     # Default landing state.
-    st.info("Configure the network topology in the sidebar and click **Run Simulation** to begin.")
+    st.info("Configure the CLOS fabric topology in the sidebar and click **Run Simulation** to begin.")
 
     col1, col2, col3 = st.columns(3)
     with col1:
         st.markdown(
-            "#### Leaf-Spine Fabric\n"
-            "Simulate data center networks with configurable "
-            "spine and leaf switch counts, buffer depths, and GPU endpoints."
+            "#### CLOS Fabric\n"
+            "Simulate scalable CLOS topologies with configurable "
+            "spine and leaf switch counts, buffer depths, and XPU endpoints."
         )
     with col2:
         st.markdown(
-            "#### ECMP vs DLB\n"
-            "Compare hash-based Equal-Cost Multi-Path routing against "
-            "Dynamic Load Balancing that uses real-time queue feedback."
+            "#### ECMP vs Adaptive LB\n"
+            "Evaluate ECMP hashing efficiency against adaptive load balancing "
+            "that distributes traffic based on real-time congestion signals."
         )
     with col3:
         st.markdown(
             "#### ECN/DCQCN\n"
-            "Watch congestion control in action: ECN marks packets at 80% "
+            "Observe congestion-like traffic patterns in action: ECN marks packets at 80% "
             "buffer utilization, DCQCN adjusts sender rates to prevent drops."
         )

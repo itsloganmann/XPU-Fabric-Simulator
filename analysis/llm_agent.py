@@ -1,26 +1,30 @@
-"""LLM-powered network analysis with deterministic fallback."""
+"""LLM-based analysis pipeline for XPU fabric telemetry.
+
+Parses telemetry logs, identifies bottleneck configurations automatically,
+and recommends routing optimizations.
+"""
 
 import json
 import os
 
-# Rule-based analysis thresholds.
+# Bottleneck detection thresholds.
 HIGH_DROP_RATE = 1.0
 HIGH_QUEUE_UTIL = 80.0
 HIGH_TAIL_LATENCY = 20.0
 
 
 def analyze_metrics(metrics_json: str, routing_mode: str = "ECMP") -> str:
-    """Analyze simulation metrics using an LLM or fall back to rule-based analysis.
+    """Analyze fabric telemetry using an LLM or fall back to rule-based analysis.
 
     Tries OpenAI first if OPENAI_API_KEY is set, otherwise uses a deterministic
     rule engine so the demo works without any API keys.
 
     Args:
-        metrics_json: JSON string of simulation summary metrics.
+        metrics_json: JSON telemetry log from the simulation.
         routing_mode: The routing mode used in the simulation.
 
     Returns:
-        Human-readable analysis string.
+        Human-readable analysis with bottleneck identification and routing recommendations.
     """
     api_key = os.environ.get("OPENAI_API_KEY")
     if api_key:
@@ -29,7 +33,7 @@ def analyze_metrics(metrics_json: str, routing_mode: str = "ECMP") -> str:
 
 
 def _llm_analysis(metrics_json: str, routing_mode: str, api_key: str) -> str:
-    """Send metrics to OpenAI for analysis."""
+    """Send telemetry to OpenAI for bottleneck analysis."""
     try:
         from openai import OpenAI
         client = OpenAI(api_key=api_key)
@@ -39,17 +43,19 @@ def _llm_analysis(metrics_json: str, routing_mode: str, api_key: str) -> str:
                 {
                     "role": "system",
                     "content": (
-                        "You are an Arista NetOps AI assistant. Analyze data center "
-                        "network simulation metrics and explain congestion patterns, "
-                        "root causes, and recommendations. Be specific about which "
-                        "switches and ports are problematic. Reference the routing "
-                        f"mode used ({routing_mode}) in your analysis. Keep the "
-                        "response under 200 words."
+                        "You are an XPU fabric network analyst. Parse the following "
+                        "telemetry logs from a CLOS fabric simulation. Identify "
+                        "bottleneck configurations automatically and recommend "
+                        "routing optimizations. Be specific about which switches "
+                        "and ports are problematic. Reference the routing mode used "
+                        f"({routing_mode}) and whether ECMP hashing is causing "
+                        "collisions or whether adaptive load balancing is distributing "
+                        "traffic effectively. Keep the response under 200 words."
                     ),
                 },
                 {
                     "role": "user",
-                    "content": f"Analyze these simulation metrics:\n{metrics_json}",
+                    "content": f"Analyze this telemetry log:\n{metrics_json}",
                 },
             ],
             temperature=0.3,
@@ -57,30 +63,29 @@ def _llm_analysis(metrics_json: str, routing_mode: str, api_key: str) -> str:
         )
         return response.choices[0].message.content
     except Exception as e:
-        # Fall back to rule-based if the API call fails.
         return _rule_based_analysis(metrics_json, routing_mode) + (
             f"\n\n[Note: LLM analysis unavailable ({e}). Showing rule-based analysis.]"
         )
 
 
 def _rule_based_analysis(metrics_json: str, routing_mode: str) -> str:
-    """Deterministic rule-based analysis of simulation metrics."""
+    """Parse telemetry logs and identify bottleneck configurations."""
     data = json.loads(metrics_json)
     findings = []
     recommendations = []
 
-    # Check overall drop rate.
+    # Overall drop rate analysis.
     drop_rate = data.get("drop_rate_pct", 0)
     total_drops = data.get("total_packets_dropped", 0)
     total_sent = data.get("total_packets_sent", 0)
 
     if drop_rate > HIGH_DROP_RATE:
         findings.append(
-            f"The network dropped {total_drops} of {total_sent} packets "
-            f"({drop_rate}% drop rate), indicating significant congestion."
+            f"The fabric dropped {total_drops} of {total_sent} packets "
+            f"({drop_rate}% drop rate), indicating congestion in the CLOS topology."
         )
 
-    # Analyze per-switch metrics.
+    # Per-switch bottleneck identification.
     switches = data.get("switches", {})
     congested_spines = []
     congested_leaves = []
@@ -98,74 +103,74 @@ def _rule_based_analysis(metrics_json: str, routing_mode: str) -> str:
     if congested_spines:
         spine_names = ", ".join(s[0] for s in congested_spines)
         findings.append(
-            f"Spine switches [{spine_names}] experienced buffer saturation "
-            f"(peak utilization above {HIGH_QUEUE_UTIL}%)."
+            f"Bottleneck identified: spine switches [{spine_names}] experienced "
+            f"buffer saturation (peak utilization above {HIGH_QUEUE_UTIL}%)."
         )
 
         if routing_mode == "ECMP":
             findings.append(
-                "This is consistent with ECMP hash collisions, where multiple "
-                "flows hash to the same spine uplink, leaving other spines "
-                "underutilized."
+                "ECMP hashing inefficiency detected: multiple flows hash to the "
+                "same spine uplink, creating hotspots while leaving other spines "
+                "underutilized. This is a known limitation of static hash-based "
+                "path selection in CLOS fabrics."
             )
             recommendations.append(
-                "Switch to Dynamic Load Balancing (DLB) to spray packets across "
-                "spines based on real-time queue depths, avoiding hash-collision "
-                "hotspots."
+                "Switch to Adaptive Load Balancing to spray packets across "
+                "spines based on real-time queue depths, eliminating the "
+                "hash-collision bottleneck."
             )
 
     if congested_leaves:
         leaf_names = ", ".join(s[0] for s in congested_leaves)
         findings.append(
-            f"Leaf switches [{leaf_names}] show high queue utilization, "
-            f"suggesting downstream bottlenecks or oversubscription."
+            f"Bottleneck identified: leaf switches [{leaf_names}] show high queue "
+            f"utilization, suggesting downstream oversubscription in the fabric."
         )
 
-    # Analyze latency.
+    # Latency analysis.
     latency = data.get("latency", {})
     p99 = latency.get("p99", 0)
     p50 = latency.get("p50", 0)
 
     if p99 > HIGH_TAIL_LATENCY:
         findings.append(
-            f"Tail latency is elevated (p99: {p99}, p50: {p50}), "
-            f"indicating queuing delays from congested links."
+            f"Tail latency elevated (p99: {p99}, p50: {p50}), caused by "
+            f"queuing delays at congested fabric links."
         )
 
-    # ECN/DCQCN effectiveness.
+    # ECN/DCQCN analysis.
     ecn_marks = data.get("total_ecn_marks", 0)
     if ecn_marks > 0:
         findings.append(
-            f"ECN marked {ecn_marks} packets, triggering DCQCN rate limiting "
-            f"on affected flows. This helped prevent additional drops but "
-            f"increased flow completion time."
+            f"ECN marked {ecn_marks} packets, triggering DCQCN rate limiting. "
+            f"Congestion control helped prevent additional drops but increased "
+            f"flow completion time."
         )
 
     if not findings:
         findings.append(
-            "The network performed well with no significant congestion. "
-            "Queue utilization remained within acceptable limits and packet "
-            "drops were minimal."
+            "No bottlenecks detected. The CLOS fabric performed well with "
+            "queue utilization within acceptable limits and minimal packet drops."
         )
 
-    if routing_mode == "DLB" and not congested_spines:
+    if routing_mode == "Adaptive Load Balancing" and not congested_spines:
         recommendations.append(
-            "DLB is effectively distributing load across spine switches. "
-            "The even queue distribution confirms dynamic spraying is working."
+            "Adaptive load balancing is effectively distributing traffic across "
+            "spine switches. Even queue distribution confirms congestion-free operation."
         )
 
     if not recommendations:
         recommendations.append(
-            "Current configuration is performing adequately. Consider "
+            "Current fabric configuration is performing adequately. Consider "
             "increasing buffer capacity if latency requirements tighten."
         )
 
-    # Build the report.
-    report = "## Network Analysis\n\n"
-    report += "### Findings\n\n"
+    # Build the analysis report.
+    report = "## Telemetry Analysis\n\n"
+    report += "### Bottleneck Identification\n\n"
     for f in findings:
         report += f"- {f}\n"
-    report += "\n### Recommendations\n\n"
+    report += "\n### Routing Optimization Recommendations\n\n"
     for r in recommendations:
         report += f"- {r}\n"
 
