@@ -34,142 +34,146 @@ st.set_page_config(
 
 st.markdown("""
 <style>
-    /* Global App Background Enhancement */
+    @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Inter:wght@400;600;900&display=swap');
+
+    /* Global Palantir Gotham Background */
     .stApp {
-        background: radial-gradient(circle at 10% 20%, rgb(11, 15, 25) 0%, rgb(5, 7, 13) 90%);
+        background-color: #0b0d14;
+        background-image: 
+            linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+        background-size: 20px 20px;
+        font-family: 'Inter', sans-serif;
     }
 
-    /* Extreme Liquid Header */
+    /* Tactical Header */
     .main-header {
-        font-size: 3.5rem;
-        font-weight: 900;
-        background: linear-gradient(135deg, #00f2fe 0%, #4facfe 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
+        font-family: 'Share Tech Mono', monospace;
+        font-size: 2.8rem;
+        font-weight: 400;
+        color: #d1d5db;
         margin-bottom: 0px;
-        letter-spacing: -2px;
-        animation: pulseGradient 6s ease-in-out infinite alternate;
-        text-shadow: 0px 5px 20px rgba(79, 172, 254, 0.3);
+        letter-spacing: -1px;
+        text-transform: uppercase;
+        border-bottom: 1px solid rgba(0, 242, 254, 0.3);
+        padding-bottom: 0.5rem;
+        display: inline-block;
     }
 
-    @keyframes pulseGradient {
-        0% { filter: hue-rotate(0deg); }
-        100% { filter: hue-rotate(15deg); }
+    .main-header::before {
+        content: '■ ';
+        color: #00f2fe;
     }
 
     .sub-header {
-        color: #b0c4de;
-        font-size: 1.25rem;
+        color: #6b7280;
+        font-family: 'Share Tech Mono', monospace;
+        font-size: 1rem;
+        margin-top: 0.5rem;
         margin-bottom: 2.5rem;
-        font-weight: 300;
-        letter-spacing: 0.5px;
+        text-transform: uppercase;
+        letter-spacing: 1px;
     }
 
-    /* Ultimate Liquid Glass Card */
+    /* Sharp, Technical Cards */
     .metric-card {
-        background: rgba(16, 22, 36, 0.4);
-        backdrop-filter: blur(16px) saturate(180%);
-        -webkit-backdrop-filter: blur(16px) saturate(180%);
-        border: 1px solid rgba(255, 255, 255, 0.08);
-        border-radius: 24px;
-        padding: 2rem;
-        text-align: center;
-        box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.5), inset 0 1px 1px rgba(255, 255, 255, 0.1);
-        transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        background: rgba(16, 20, 28, 0.85);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-top: 2px solid #00f2fe;
+        border-radius: 2px;
+        padding: 1.5rem;
+        text-align: left;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.5);
+        transition: border-color 0.2s;
         position: relative;
-        overflow: hidden;
     }
-
-    .metric-card::before {
+    
+    /* Corner HUD brackets */
+    .metric-card::after {
         content: '';
         position: absolute;
-        top: 0; left: -100%; width: 50%; height: 100%;
-        background: linear-gradient(to right, rgba(255,255,255,0) 0%, rgba(255,255,255,0.05) 50%, rgba(255,255,255,0) 100%);
-        transform: skewX(-25deg);
-        animation: shine 6s infinite;
-    }
-
-    @keyframes shine {
-        0% { left: -100%; }
-        20% { left: 200%; }
-        100% { left: 200%; }
+        bottom: 0;
+        right: 0;
+        width: 10px;
+        height: 10px;
+        border-bottom: 2px solid rgba(255,255,255,0.2);
+        border-right: 2px solid rgba(255,255,255,0.2);
     }
 
     .metric-card:hover {
-        transform: translateY(-8px) scale(1.02);
-        border-color: rgba(0, 242, 254, 0.5);
-        box-shadow: 0 15px 40px 0 rgba(0, 242, 254, 0.2), inset 0 1px 1px rgba(255, 255, 255, 0.2);
+        border-color: rgba(0, 242, 254, 0.4);
+        background: rgba(16, 20, 28, 0.95);
     }
 
     .metric-value {
-        font-size: 3.2rem;
-        font-weight: 900;
-        background: linear-gradient(135deg, #ffffff 0%, #00f2fe 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        line-height: 1.1;
+        font-family: 'Share Tech Mono', monospace;
+        font-size: 2.5rem;
+        color: #f3f4f6;
+        line-height: 1;
+        margin-bottom: 0.5rem;
     }
 
     .metric-label {
-        font-size: 0.95rem;
-        color: #6a8bad;
-        margin-top: 0.8rem;
+        font-family: 'Share Tech Mono', monospace;
+        font-size: 0.75rem;
+        color: #9ca3af;
         text-transform: uppercase;
-        letter-spacing: 2px;
-        font-weight: 700;
+        letter-spacing: 1.5px;
     }
 
-    /* LLM Analysis Box */
+    /* LLM Analysis Box - Alert Style */
     .analysis-box {
-        background: rgba(10, 15, 26, 0.6);
-        backdrop-filter: blur(20px);
-        border-left: 4px solid #00f2fe;
-        border-radius: 16px;
-        padding: 2.5rem;
-        line-height: 1.8;
-        font-size: 1.1rem;
-        color: #e2e8f0;
-        box-shadow: 0 10px 30px rgba(0, 242, 254, 0.08);
-        transition: all 0.3s ease;
+        background: rgba(20, 20, 20, 0.9);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-left: 3px solid #ff9f43;
+        border-radius: 2px;
+        padding: 2rem;
+        line-height: 1.6;
+        font-family: 'Share Tech Mono', monospace;
+        font-size: 0.95rem;
+        color: #d1d5db;
+    }
+
+    /* Sidebar Technical */
+    div[data-testid="stSidebar"] {
+        background: #0d1117 !important;
+        border-right: 1px solid rgba(255,255,255,0.08);
+        font-family: 'Inter', sans-serif;
     }
     
-    .analysis-box:hover {
-        background: rgba(15, 20, 35, 0.7);
-        box-shadow: 0 10px 40px rgba(0, 242, 254, 0.15);
-    }
+    .css-1d391kg { font-family: 'Share Tech Mono', monospace; } /* Sidebar text */
 
-    /* Sidebar Glass */
-    div[data-testid="stSidebar"] {
-        background: rgba(8, 11, 18, 0.8) !important;
-        backdrop-filter: blur(10px) !important;
-        border-right: 1px solid rgba(255,255,255,0.05);
-    }
-
-    /* Clean up default Streamlit elements */
+    /* Clean up default Streamlit */
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     header {background: transparent !important;}
     
-    /* Input widgets styling */
+    /* UI Inputs - Flat design */
     div[data-baseweb="select"] > div {
-        background-color: rgba(255, 255, 255, 0.05);
-        border: 1px solid rgba(255, 255, 255, 0.1);
-        border-radius: 8px;
+        background-color: #161b22;
+        border: 1px solid #30363d;
+        border-radius: 2px;
+        color: #c9d1d9;
     }
     
     button[kind="primary"] {
-        background: linear-gradient(135deg, #00f2fe 0%, #4facfe 100%);
+        background-color: #00f2fe;
+        color: #0b0d14;
         border: none;
-        border-radius: 8px;
-        font-weight: bold;
+        border-radius: 2px;
+        font-family: 'Share Tech Mono', monospace;
+        font-weight: 600;
+        text-transform: uppercase;
         letter-spacing: 1px;
-        transition: transform 0.2s, box-shadow 0.2s;
+        transition: background-color 0.2s;
     }
     
     button[kind="primary"]:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 8px 20px rgba(0, 242, 254, 0.3);
+        background-color: #4facfe;
     }
+    
+    /* Toggles to look like precise switches */
+    .st-bb { border-radius: 2px !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -488,13 +492,15 @@ def create_charts(metrics, all_switches):
         template="plotly_dark",
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
-        font=dict(family="Inter, sans-serif", size=12),
+        font=dict(family="Share Tech Mono", size=11, color="#9ca3af"),
         margin=dict(l=40, r=20, t=50, b=40),
         legend=dict(
             bgcolor="rgba(0,0,0,0)",
             bordercolor="rgba(255,255,255,0.1)",
-            font=dict(size=10),
+            font=dict(size=10, family="Share Tech Mono"),
         ),
+        xaxis=dict(showgrid=True, gridcolor='rgba(255,255,255,0.05)', zerolinecolor='rgba(255,255,255,0.2)'),
+        yaxis=dict(showgrid=True, gridcolor='rgba(255,255,255,0.05)', zerolinecolor='rgba(255,255,255,0.2)'),
     )
 
     charts = {}
