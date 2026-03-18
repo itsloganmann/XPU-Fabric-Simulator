@@ -1,54 +1,41 @@
-<div align="center">
-  <img src="https://upload.wikimedia.org/wikipedia/commons/e/e0/Arista_Networks_logo.svg" alt="Arista Demo Quality" width="200"/>
-</div>
+# XPU-Fabric Simulator
 
-# XPU-Fabric Simulator 🚀
+An industry-standard discrete-event simulator for evaluating ECMP hashing efficiency versus Adaptive Load Balancing in RoCEv2 AI Data Center networks.
 
-A high-fidelity CLOS fabric discrete-event simulator evaluating ECMP hashing efficiency vs. Adaptive Load Balancing for RoCEv2 AI Data Center networks. Built with a stunning **Liquid Glass UI**, interactive **Three.js 3D Datacenter visualization**, a real-time **Prometheus telemetry pipeline**, and **LLM-powered PromQL** bottleneck analysis.
+This project accurately models a lossless physics engine where flow control tightens the ECN/DCQCN feedback loop, keeping packet loss effectively at zero under appropriate loads. It features a complete telemetry pipeline, live dashboarding, and an LLM-powered telemetry agent.
 
-> "A true RoCEv2 environment utilizes flow control to pause traffic, keeping packet loss effectively at zero. This simulator models that physics engine."
+## Architecture
 
-### 🌟 Grafana Live Telemetry Dashboard
-![Grafana Dashboard Diagram](https://raw.githubusercontent.com/grafana/grafana/main/public/img/grafana_icon.svg)
-*(See `grafana/dashboards/xpu_fabric.json` for the provisioned layout. Insert local screenshot of Grafana dashboard here.)*
+The simulation is encapsulated in a Docker Compose stack utilizing production-grade monitoring tools:
+*   **gNMI Poller Simulator:** Emits realistic CLOS fabric telemetry (queue depths, link state, ECN marks).
+*   **Prometheus:** Time-series database scraping fabric metrics.
+*   **Grafana:** Auto-provisioned dashboard for live telemetry visualization.
+*   **MCP Server (Model Context Protocol):** Bridging the frontend LLM agent to PromQL for live data querying.
+*   **Streamlit & Three.js:** A scalable, modern frontend featuring interactive 3D datacenter rendering and dynamic metrics.
 
-### 🤖 LLM-Powered PromQL Agent
-![LLM Query Diagram](https://raw.githubusercontent.com/OpenAI/chatgpt-logo/main/public/images/chatgpt-logo.svg)
-*(Insert GIF of Streamlit Agent detecting ECMP hash collisions via MCP server here.)*
+## Quickstart
 
----
-
-## Architecture & Stack
-
-This project strictly adheres to industry-standard networking telemetry pipelines:
-- **Simulated Arista gNMI Poller** - Emits realistic switch telemetry (queue depths, link state, ECN marks).
-- **Prometheus** - Time-series backbone scraping the fabric telemetry metrics.
-- **Grafana** - Auto-provisioned UI with a pre-configured AI Fabric dashboard.
-- **MCP Server** - A local Model Context Protocol backend enabling the LLM to query PromQL dynamically.
-- **Streamlit & Three.js** - Ultra-modern presentation layer with deep blurs and Bloom emissives.
-- **Docker Compose** - One-command orchestration.
-
-## 🚀 Quickstart
-
-No public website required. Spin up the entire infrastructure locally in seconds:
+Spin up the entire telemetry stack and simulation engine locally:
 
 ```bash
-# Export your LLM token
-export GEMINI_API_KEY="your_api_key"
+# Export API key for the telemetry analysis agent (Gemini or OpenAI)
+export GEMINI_API_KEY="your_api_key_here"
 
-# Stand up the cluster
+# Launch the stack
 docker compose up -d --build
 ```
 
-### Access Points
-- **Streamlit Application**: [http://localhost:8501](http://localhost:8501)
-- **Grafana Dashboard**: [http://localhost:3000](http://localhost:3000) *(admin/admin)*
-- **Prometheus**: [http://localhost:9090](http://localhost:9090)
+### Endpoints
+*   **Simulator UI:** [http://localhost:8501](http://localhost:8501)
+*   **Grafana Telemetry:** [http://localhost:3000](http://localhost:3000) *(User: admin / Pass: admin)*
+*   **Prometheus:** [http://localhost:9090](http://localhost:9090)
 
-## Features & Verification
-1. **0% Drop Baseline**: The physics engine perfectly mimics flow control. Launching in `Adaptive Load Balancing` yields zero packet loss across the cluster under standard oversubscribed loads.
-2. **ECMP Hash Collisions**: Switch to `ECMP` to invoke hash collisions intentionally.
-3. **Automated Analysis**: The LLM Agent queries the telemetry via the MCP Server and immediately detects the exact spine and root-cause routing failure. 
+## Demo Scenarios
+
+1.  **Lossless Baseline (DLB):**
+    The engine initializes with **Adaptive Load Balancing**. Under this default state, the physics engine perfectly mimics RoCEv2 flow control. Queue utilization scales, but packet drops remain at 0% across the fabric.
+2.  **ECMP Hash Collisions:**
+    Toggle the routing mode in the UI to **ECMP**. This simulates hash collisions across the spine tier. The LLM Agent, querying metrics via the MCP server, will automatically detect and report the resulting queue saturation and latency spikes.
 
 ---
-*Built as a high-fidelity demonstration for core data center network physics.*
+*Developed for demonstrations of core data center networking physics and telemetry architecture.*
