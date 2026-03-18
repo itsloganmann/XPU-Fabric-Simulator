@@ -198,16 +198,21 @@ with st.sidebar:
     )
 
     st.markdown("---")
-    st.markdown("### Simulation Settings")
+    st.markdown("### QoS & Simulation Settings")
+    qos_class = st.selectbox(
+        "Traffic Class (QoS)",
+        ["TC3 / DSCP 26 (Lossless AI)", "TC0 / Best Effort (Web)"],
+        help="Simulated CoS mapping for these flows.",
+    )
     routing_mode = st.selectbox(
-        "Routing Mode",
+        "Routing Protocol",
         ["Adaptive Load Balancing", "ECMP"],
         help="Adaptive Load Balancing uses real-time queue depths. ECMP uses hash-based path selection.",
     )
     workload_type = st.selectbox(
         "Traffic Pattern",
         ["All-to-All Collective", "Sparse Unicast"],
-        help="All-to-All simulates distributed training collectives. Sparse Unicast models request-response traffic.",
+        help="All-to-All simulates distributed training collectives.",
     )
     sim_duration = st.slider(
         "Simulation Ticks",
@@ -217,13 +222,26 @@ with st.sidebar:
         step=50,
         help="Number of time steps to simulate.",
     )
+    
+    st.markdown("---")
+    st.markdown("### Advanced RoCEv2 Tuning")
+    pfc_enabled = st.toggle("Priority Flow Control (PFC)", value=True, help="IEEE 802.1Qbb: Send PAUSE frames to prevent queue drops.")
+    mtu_size = st.selectbox("MTU Size (Bytes)", [1500, 4096, 9000], index=2, help="Jumbo Frames (9000) reduce packet counts and overhead.")
     buffer_capacity = st.slider(
-        "Buffer Capacity (packets)",
+        "Buffer Capacity (Packets)",
         min_value=32,
         max_value=512,
         value=128,
         step=32,
-        help="Per-port buffer depth on each switch.",
+    )
+    buffer_headroom = st.slider(
+        "PFC Headroom (Packets)",
+        min_value=2,
+        max_value=64,
+        value=16,
+        step=2,
+        help="Trigger PFC PAUSE when remaining buffer drops below this threshold.",
+        disabled=not pfc_enabled
     )
 
     st.markdown("---")
@@ -252,14 +270,14 @@ with st.container():
 st.markdown("---")
 
 
-def build_topology(num_spines, num_leaves, gpus_per_leaf, buffer_capacity):
+def build_topology(num_spines, num_leaves, gpus_per_leaf, buffer_capacity, pfc_enabled, buffer_headroom):
     """Construct the CLOS fabric topology with XPU endpoints."""
     spines = [
-        Switch(switch_id=i, switch_type="spine", buffer_capacity=buffer_capacity, num_ports=num_leaves)
+        Switch(switch_id=i, switch_type="spine", buffer_capacity=buffer_capacity, num_ports=num_leaves, pfc_enabled=pfc_enabled, headroom=buffer_headroom)
         for i in range(num_spines)
     ]
     leaves = [
-        Switch(switch_id=i, switch_type="leaf", buffer_capacity=buffer_capacity, num_ports=num_spines + gpus_per_leaf)
+        Switch(switch_id=i, switch_type="leaf", buffer_capacity=buffer_capacity, num_ports=num_spines + gpus_per_leaf, pfc_enabled=pfc_enabled, headroom=buffer_headroom)
         for i in range(num_leaves)
     ]
     gpus = []
@@ -274,10 +292,11 @@ def build_topology(num_spines, num_leaves, gpus_per_leaf, buffer_capacity):
 
 
 def run_simulation(num_spines, num_leaves, gpus_per_leaf, routing_mode,
-                   workload_type, sim_duration, buffer_capacity):
+                   workload_type, sim_duration, buffer_capacity,
+                   pfc_enabled, mtu_size, buffer_headroom):
     """Execute the fabric simulation and return collected telemetry."""
     spines, leaves, gpus, gpu_to_leaf = build_topology(
-        num_spines, num_leaves, gpus_per_leaf, buffer_capacity
+        num_spines, num_leaves, gpus_per_leaf, buffer_capacity, pfc_enabled, buffer_headroom
     )
     metrics = MetricsCollector()
     engine = EventLoop()
@@ -285,12 +304,12 @@ def run_simulation(num_spines, num_leaves, gpus_per_leaf, routing_mode,
     # Seed for reproducibility.
     random.seed(42)
 
-    # Generate workload flows.
+    # Generate workload flows factoring in MTU packet scaling.
     base_rate = 10.0 if workload_type == "All-to-All Collective" else 5.0
     if workload_type == "All-to-All Collective":
-        flows = all_to_all_workload(gpus, base_rate=base_rate)
+        flows = all_to_all_workload(gpus, base_rate=base_rate, mtu=mtu_size)
     else:
-        flows = web_traffic_workload(gpus, base_rate=base_rate, density=0.15)
+        flows = web_traffic_workload(gpus, base_rate=base_rate, density=0.15, mtu=mtu_size)
 
     if not flows:
         return None, None, None, "No flows generated. Try a different configuration."
@@ -352,9 +371,13 @@ def run_simulation(num_spines, num_leaves, gpus_per_leaf, routing_mode,
 
             # Enqueue on the source leaf's uplink port.
             uplink_port = gpus_per_leaf + spine_idx
-            if not src_leaf.enqueue(uplink_port, pkt):
+            status_up = src_leaf.enqueue(uplink_port, pkt)
+            if status_up == "DROP":
                 metrics.total_packets_dropped += 1
                 continue
+            elif status_up == "PAUSE":
+                # Simulated PFC pause logic, packet is held at the sender logic temporarily
+                flow.record_latency(2.0)
 
             # Check ECN at source leaf.
             if check_ecn(src_leaf.queue_depth(uplink_port), buffer_capacity):
@@ -363,10 +386,13 @@ def run_simulation(num_spines, num_leaves, gpus_per_leaf, routing_mode,
 
             # Enqueue on the spine's ingress port.
             spine_port_in = pkt.src_leaf
-            if not spine.enqueue(spine_port_in, pkt):
+            status_spin = spine.enqueue(spine_port_in, pkt)
+            if status_spin == "DROP":
                 metrics.total_packets_dropped += 1
                 src_leaf.dequeue(uplink_port)
                 continue
+            elif status_spin == "PAUSE":
+                flow.record_latency(2.0)
 
             # Check ECN at spine ingress.
             if check_ecn(spine.queue_depth(spine_port_in), buffer_capacity):
@@ -375,11 +401,14 @@ def run_simulation(num_spines, num_leaves, gpus_per_leaf, routing_mode,
 
             # Enqueue on the spine's egress port toward the destination leaf.
             spine_port_out = pkt.dst_leaf
-            if not spine.enqueue(spine_port_out, pkt):
+            status_spout = spine.enqueue(spine_port_out, pkt)
+            if status_spout == "DROP":
                 metrics.total_packets_dropped += 1
                 src_leaf.dequeue(uplink_port)
                 spine.dequeue(spine_port_in)
                 continue
+            elif status_spout == "PAUSE":
+                flow.record_latency(2.0)
 
             # Check ECN at spine egress.
             if check_ecn(spine.queue_depth(spine_port_out), buffer_capacity):
@@ -388,12 +417,15 @@ def run_simulation(num_spines, num_leaves, gpus_per_leaf, routing_mode,
 
             # Enqueue on the destination leaf's downlink.
             downlink_port = spine_idx
-            if not dst_leaf.enqueue(downlink_port, pkt):
+            status_down = dst_leaf.enqueue(downlink_port, pkt)
+            if status_down == "DROP":
                 metrics.total_packets_dropped += 1
                 src_leaf.dequeue(uplink_port)
                 spine.dequeue(spine_port_in)
                 spine.dequeue(spine_port_out)
                 continue
+            elif status_down == "PAUSE":
+                flow.record_latency(2.0)
 
             # Packet delivered. Calculate latency from queuing delays.
             latency = (
@@ -437,8 +469,15 @@ def run_simulation(num_spines, num_leaves, gpus_per_leaf, routing_mode,
 
         metrics.record_tick(tick, switch_data, link_utils)
 
+    # Summarize PFC Metrics explicitly
+    total_pfc_pauses = sum(sw.total_pauses for sw in all_switches)
+
     summary_json = metrics.summary_json(all_switches)
-    return metrics, all_switches, summary_json, None
+    import json
+    data = json.loads(summary_json)
+    data["total_pfc_pauses"] = total_pfc_pauses
+    
+    return metrics, all_switches, json.dumps(data), None
 
 
 def create_charts(metrics, all_switches):
@@ -526,7 +565,7 @@ def create_charts(metrics, all_switches):
 # -- Main panel --
 
 if run_button:
-    with st.spinner("Running simulation..."):
+    with st.spinner("Running high-fidelity simulation..."):
         start_time = time.time()
         metrics, switches, summary_json, error = run_simulation(
             num_spines=num_spines,
@@ -536,6 +575,9 @@ if run_button:
             workload_type=workload_type,
             sim_duration=sim_duration,
             buffer_capacity=buffer_capacity,
+            pfc_enabled=pfc_enabled,
+            mtu_size=mtu_size,
+            buffer_headroom=buffer_headroom
         )
         elapsed = time.time() - start_time
 
@@ -558,14 +600,14 @@ if run_button:
             st.markdown(
                 f'<div class="metric-card">'
                 f'<div class="metric-value">{summary["total_packets_dropped"]:,}</div>'
-                f'<div class="metric-label">Packets Dropped</div></div>',
+                f'<div class="metric-label">Queue Drops</div></div>',
                 unsafe_allow_html=True,
             )
         with col3:
             st.markdown(
                 f'<div class="metric-card">'
-                f'<div class="metric-value">{summary["drop_rate_pct"]}%</div>'
-                f'<div class="metric-label">Drop Rate</div></div>',
+                f'<div class="metric-value">{summary.get("total_pfc_pauses", 0):,}</div>'
+                f'<div class="metric-label">PFC Pauses</div></div>',
                 unsafe_allow_html=True,
             )
         with col4:

@@ -30,36 +30,54 @@ class Switch:
     switch_type: str  # 'leaf' or 'spine'
     buffer_capacity: int = 128
     num_ports: int = 8
+    pfc_enabled: bool = False
+    headroom: int = 32
     port_queues: dict[int, list[Packet]] = field(default_factory=dict)
     drops: dict[int, int] = field(default_factory=dict)
+    pauses: dict[int, int] = field(default_factory=dict)
     peak_queue: dict[int, int] = field(default_factory=dict)
 
     def __post_init__(self):
         for port in range(self.num_ports):
             self.port_queues.setdefault(port, [])
             self.drops.setdefault(port, 0)
+            self.pauses.setdefault(port, 0)
             self.peak_queue.setdefault(port, 0)
 
-    def enqueue(self, port: int, packet: Packet) -> bool:
-        """Add a packet to a port queue. Returns False if the queue is full (drop)."""
+    def enqueue(self, port: int, packet: Packet) -> str:
+        """
+        Add a packet to a port queue. 
+        Returns:
+            "OK": Successfully queued
+            "PAUSE": PFC prevented a drop but delayed transmission upstream
+            "DROP": Queue overflowed (PFC disabled or failed)
+        """
         if port not in self.port_queues:
             self.port_queues[port] = []
             self.drops[port] = 0
+            self.pauses[port] = 0
             self.peak_queue[port] = 0
 
         queue = self.port_queues[port]
-        if len(queue) >= self.buffer_capacity:
+        current_depth = len(queue)
+
+        # Check PFC Headroom watermark
+        if self.pfc_enabled and (current_depth >= self.buffer_capacity - self.headroom):
+            self.pauses[port] += 1
+            return "PAUSE"
+            
+        if current_depth >= self.buffer_capacity:
             self.drops[port] += 1
-            return False
+            return "DROP"
 
         queue.append(packet)
 
         # Track peak utilization
-        current_depth = len(queue)
-        if current_depth > self.peak_queue.get(port, 0):
-            self.peak_queue[port] = current_depth
+        new_depth = len(queue)
+        if new_depth > self.peak_queue.get(port, 0):
+            self.peak_queue[port] = new_depth
 
-        return True
+        return "OK"
 
     def dequeue(self, port: int) -> Packet | None:
         """Remove and return the next packet from a port queue."""
@@ -79,6 +97,10 @@ class Switch:
     @property
     def total_drops(self) -> int:
         return sum(self.drops.values())
+
+    @property
+    def total_pauses(self) -> int:
+        return sum(self.pauses.values())
 
     @property
     def max_queue_utilization(self) -> float:
