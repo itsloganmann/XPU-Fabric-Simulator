@@ -2,13 +2,8 @@
 
 from simulator.gpu import Flow
 
-# ECN marking threshold: mark packets when queue is at 80% capacity.
-ECN_THRESHOLD = 0.8
-
-# DCQCN rate adjustment parameters.
-DCQCN_DECREASE_FACTOR = 0.5  # Multiplicative decrease on congestion.
-DCQCN_INCREASE_STEP = 0.5    # Additive increase during recovery.
-DCQCN_MIN_RATE = 1.0         # Floor to prevent starvation.
+# ECN marking threshold: mark packets when queue is at 50% capacity.
+ECN_THRESHOLD = 0.5
 
 
 def check_ecn(queue_depth: int, capacity: int) -> bool:
@@ -25,7 +20,9 @@ def dcqcn_adjust(flow: Flow, ecn_marked: bool):
     No ECN: additive increase to slowly recover toward the base rate.
     """
     if ecn_marked:
-        flow.rate = max(flow.rate * DCQCN_DECREASE_FACTOR, DCQCN_MIN_RATE)
+        # Cut rate in half, but don't let it starve completely (min 5% of base_rate).
+        flow.rate = max(flow.rate * 0.5, flow.base_rate * 0.05)
         flow.ecn_count += 1
     else:
-        flow.rate = min(flow.rate + DCQCN_INCREASE_STEP, flow.base_rate)
+        # Recover slowly by adding 5% of base rate back each tick.
+        flow.rate = min(flow.rate + (flow.base_rate * 0.05), flow.base_rate)

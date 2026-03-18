@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Datacenter Visualizer</title>
+    <!-- Modern Three.js & PostProcessing -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/EffectComposer.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/RenderPass.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/ShaderPass.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/CopyShader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/LuminosityHighPassShader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/UnrealBloomPass.js"></script>
+    <style>
+        body { margin: 0; padding: 0; overflow: hidden; background: transparent; font-family: 'Inter', sans-serif; }
+        #canvas-container { width: 100vw; height: 100vh; display: block; }
+        
+        .overlay {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(10, 15, 26, 0.4);
+            backdrop-filter: blur(16px) saturate(180%);
+            -webkit-backdrop-filter: blur(16px) saturate(180%);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 20px;
+            padding: 20px;
+            color: #fff;
+            width: 320px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.6), inset 0 1px 1px rgba(255, 255, 255, 0.15);
+            z-index: 10;
+        }
+
+        .overlay h2 { margin: 0 0 15px 0; font-size: 1.2rem; font-weight: 700; color: #00f2fe; letter-spacing: 0.5px; }
+        
+        .search-box {
+            width: 100%;
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 6px;
+            padding: 8px 10px;
+            color: white;
+            box-sizing: border-box;
+            outline: none;
+            margin-bottom: 12px;
+        }
+        
+        .search-box:focus {
+            border-color: #00d4aa;
+        }
+
+        .inventory-list {
+            max-height: 250px;
+            overflow-y: auto;
+            margin: 0;
+            padding: 0;
+            list-style: none;
+        }
+
+        .inventory-item {
+            padding: 8px 10px;
+            margin-bottom: 6px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            font-size: 0.85rem;
+        }
+
+        .inventory-item:hover {
+            background: rgba(0, 212, 170, 0.2);
+            border-left: 3px solid #00d4aa;
+        }
+
+        .item-icon {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+
+        .icon-spine { background: #ff4757; box-shadow: 0 0 8px #ff4757; }
+        .icon-leaf { background: #00f2fe; box-shadow: 0 0 8px #00f2fe; }
+        .icon-gpu { background: #1e90ff; box-shadow: 0 0 8px #1e90ff; }
+
+        .tooltip {
+            position: absolute;
+            background: rgba(5, 7, 13, 0.85);
+            backdrop-filter: blur(10px);
+            border: 1px solid #00f2fe;
+            border-radius: 10px;
+            padding: 12px 16px;
+            color: white;
+            font-size: 0.85rem;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            z-index: 20;
+            white-space: nowrap;
+            box-shadow: 0 8px 32px rgba(0, 242, 254, 0.2);
+            line-height: 1.5;
+        }
+
+        /* Scrollbar styles */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: rgba(0,0,0,0.1); }
+        ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 3px; }
+    </style>
+</head>
+<body>
+    <div id="canvas-container"></div>
+    
+    <div class="overlay">
+        <h2>Network Inventory</h2>
+        <input type="text" class="search-box" id="searchInput" placeholder="Search components (e.g., Spine, GPU)...">
+        <ul class="inventory-list" id="inventoryList">
+            <!-- Populated via JS -->
+        </ul>
+    </div>
+
+    <div class="tooltip" id="tooltip"></div>
+
+    <script>
+        // Init Scene
+        const scene = new THREE.Scene();
+        // Transparent background matching Streamlit dark mode
+        scene.background = new THREE.Color(0x0e1117); 
+        
+        // Setup Camera
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(0, 50, 80);
+
+        // Setup Renderer
+        const canvasContainer = document.getElementById('canvas-container');
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        canvasContainer.appendChild(renderer.domElement);
+
+        // Post-Processing (Bloom for glowing LEDs)
+        const renderScene = new THREE.RenderPass(scene, camera);
+        const bloomPass = new THREE.UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 1.5, 0.4, 0.85);
+        bloomPass.threshold = 0.2;
+        bloomPass.strength = 1.2;
+        bloomPass.radius = 0.5;
+
+        const composer = new THREE.EffectComposer(renderer);
+        composer.addPass(renderScene);
+        composer.addPass(bloomPass);
+
+        // Controls
+        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        controls.maxPolarAngle = Math.PI / 2 + 0.1;
+
+        // Extreme Lighting
+        const ambientLight = new THREE.AmbientLight(0x404040, 0.8);
+        scene.add(ambientLight);
+
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.5);
+        dirLight.position.set(30, 50, -30);
+        dirLight.castShadow = true;
+        scene.add(dirLight);
+
+        const cyanLight = new THREE.PointLight(0x00f2fe, 3, 120);
+        cyanLight.position.set(-20, 30, 20);
+        scene.add(cyanLight);
+
+        const neonPink = new THREE.PointLight(0xff0844, 2, 120);
+        neonPink.position.set(20, 30, -20);
+        scene.add(neonPink);
+
+        // Ground Plane (Mirrored Glossy look)
+        const gridHelper = new THREE.GridHelper(200, 40, 0x00f2fe, 0x111111);
+        gridHelper.position.y = -0.1;
+        gridHelper.material.opacity = 0.4;
+        gridHelper.material.transparent = true;
+        scene.add(gridHelper);
+
+        const planeGeo = new THREE.PlaneGeometry(200, 200);
+        const planeMat = new THREE.MeshStandardMaterial({ 
+            color: 0x05070d, 
+            roughness: 0.0,
+            metalness: 0.8
+        });
+        const plane = new THREE.Mesh(planeGeo, planeMat);
+        plane.rotation.x = -Math.PI / 2;
+        plane.receiveShadow = true;
+        scene.add(plane);
+
+        // Component Data Storage
+        const components = [];
+        const interactableMeshes = [];
+
+        // Materials (Higher emissiveness for Bloom)
+        const materials = {
+            rack: new THREE.MeshStandardMaterial({ color: 0x151a25, roughness: 0.3, metalness: 0.6 }),
+            spine: new THREE.MeshStandardMaterial({ color: 0xff0055, roughness: 0.2, metalness: 0.9, emissive: 0xff0055, emissiveIntensity: 1.0 }),
+            leaf: new THREE.MeshStandardMaterial({ color: 0x00f2fe, roughness: 0.2, metalness: 0.9, emissive: 0x00f2fe, emissiveIntensity: 1.0 }),
+            gpu: new THREE.MeshStandardMaterial({ color: 0x4facfe, roughness: 0.2, metalness: 0.9, emissive: 0x4facfe, emissiveIntensity: 0.4 }),
+            linkActive: new THREE.MeshBasicMaterial({ color: 0x00f2fe }),
+            linkIdle: new THREE.LineBasicMaterial({ color: 0x00f2fe, transparent: true, opacity: 0.15 })
+        };
+
+        // Create Spine Racks (Back row)
+        const spineGroup = new THREE.Group();
+        const numSpines = 4;
+        for (let i = 0; i < numSpines; i++) {
+            const x = (i - numSpines/2 + 0.5) * 15;
+            
+            // The Box/Switch
+            const geo = new THREE.BoxGeometry(4, 2, 4);
+            const mesh = new THREE.Mesh(geo, materials.spine);
+            mesh.position.set(x, 15, -20);
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
+            
+            // Add identifying info
+            mesh.userData = { id: `Spine Switch ${i}`, type: 'spine', status: 'Active (RoCEv2)', rate: '400Gbps' };
+            interactableMeshes.push(mesh);
+            components.push(mesh.userData);
+            
+            spineGroup.add(mesh);
+            
+            // Pedestal support
+            const pedGeo = new THREE.CylinderGeometry(0.5, 0.5, 14);
+            const ped = new THREE.Mesh(pedGeo, materials.rack);
+            ped.position.set(x, 7, -20);
+            ped.castShadow = true;
+            spineGroup.add(ped);
+        }
+        scene.add(spineGroup);
+
+        // Create Leaf Racks + GPUs (Front row)
+        const leafGroup = new THREE.Group();
+        const numLeaves = 8;
+        const gpusPerLeaf = 4;
+        
+        for (let i = 0; i < numLeaves; i++) {
+            const x = (i - numLeaves/2 + 0.5) * 10;
+            const z = 10;
+            
+            // Rack structure
+            const rackGeo = new THREE.BoxGeometry(6, 16, 6);
+            const rack = new THREE.Mesh(rackGeo, materials.rack);
+            rack.position.set(x, 8, z);
+            rack.castShadow = true;
+            rack.receiveShadow = true;
+            leafGroup.add(rack);
+
+            // Leaf Switch (Top of rack)
+            const leafGeo = new THREE.BoxGeometry(5.8, 1.5, 5.8);
+            const leaf = new THREE.Mesh(leafGeo, materials.leaf);
+            leaf.position.set(x, 15, z);
+            leaf.userData = { id: `Leaf Switch ${i}`, type: 'leaf', status: 'Active (RoCEv2)', ports: '32-port 400G' };
+            interactableMeshes.push(leaf);
+            components.push(leaf.userData);
+            leafGroup.add(leaf);
+            
+            // GPUs within rack
+            for (let j = 0; j < gpusPerLeaf; j++) {
+                const gpuGeo = new THREE.BoxGeometry(5.5, 1.2, 5.5);
+                const gpu = new THREE.Mesh(gpuGeo, materials.gpu);
+                // Positioned below the leaf switch
+                gpu.position.set(x, 12 - (j * 2.5), z);
+                gpu.userData = { id: `GPU Node ${i}-${j}`, type: 'gpu', status: 'Compute', util: Math.floor(Math.random()*100) + '%' };
+                interactableMeshes.push(gpu);
+                components.push(gpu.userData);
+                leafGroup.add(gpu);
+            }
+            
+            // Draw lines from leaf to all spines (Spine-Leaf topology)
+            for(let s=0; s<numSpines; s++) {
+                const spineMesh = spineGroup.children[s*2]; // Index mapping based on creation
+                if(spineMesh) {
+                    const lineGeo = new THREE.BufferGeometry().setFromPoints([
+                        new THREE.Vector3(x, 15, z),
+                        new THREE.Vector3(spineMesh.position.x, spineMesh.position.y, spineMesh.position.z)
+                    ]);
+                    const line = new THREE.Line(lineGeo, materials.linkIdle);
+                    scene.add(line);
+                }
+            }
+        }
+        scene.add(leafGroup);
+
+        // Initialize UI Inventory
+        const inventoryList = document.getElementById('inventoryList');
+        const searchInput = document.getElementById('searchInput');
+
+        function renderInventory(filterText = '') {
+            inventoryList.innerHTML = '';
+            const lowerFilter = filterText.toLowerCase();
+            
+            components.forEach((c) => {
+                if(c.id.toLowerCase().includes(lowerFilter) || c.type.toLowerCase().includes(lowerFilter)) {
+                    const li = document.createElement('li');
+                    li.className = 'inventory-item';
+                    
+                    const icon = document.createElement('span');
+                    icon.className = `item-icon icon-${c.type}`;
+                    
+                    const text = document.createTextNode(c.id);
+                    
+                    li.appendChild(icon);
+                    li.appendChild(text);
+                    
+                    // Click to focus camera
+                    li.onclick = () => {
+                        const targetMesh = interactableMeshes.find(m => m.userData.id === c.id);
+                        if(targetMesh) {
+                            // Simple animation
+                            const startPos = camera.position.clone();
+                            const targetPos = new THREE.Vector3(targetMesh.position.x, targetMesh.position.y + 10, targetMesh.position.z + 20);
+                            
+                            controls.target.copy(targetMesh.position);
+                            camera.position.copy(targetPos);
+                            
+                            // Highlight effect
+                            const origEmissive = targetMesh.material.emissiveIntensity;
+                            targetMesh.material.emissiveIntensity = 1.0;
+                            setTimeout(() => { targetMesh.material.emissiveIntensity = origEmissive; }, 500);
+                        }
+                    };
+                    
+                    inventoryList.appendChild(li);
+                }
+            });
+        }
+        renderInventory();
+
+        searchInput.addEventListener('input', (e) => {
+            renderInventory(e.target.value);
+        });
+
+        // Raycasting for Hover Tooltips
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+        const tooltip = document.getElementById('tooltip');
+        let hoveredMesh = null;
+        let originalScale = new THREE.Vector3(1,1,1);
+
+        window.addEventListener('mousemove', (event) => {
+            // Calculate mouse position in normalized device coordinates
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+            // Handle UI tooltip positioning regardless of hit
+            tooltip.style.left = (event.clientX + 15) + 'px';
+            tooltip.style.top = (event.clientY + 15) + 'px';
+        });
+
+        // Animation Loop
+        function animate() {
+            requestAnimationFrame(animate);
+
+            // Update controls
+            controls.update();
+
+            // Raycaster parsing
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObjects(interactableMeshes);
+
+            if (intersects.length > 0) {
+                const object = intersects[0].object;
+                
+                if (hoveredMesh !== object) {
+                    if (hoveredMesh) {
+                        hoveredMesh.scale.copy(originalScale);
+                        hoveredMesh.material.emissiveIntensity -= 0.3;
+                    }
+                    hoveredMesh = object;
+                    originalScale.copy(hoveredMesh.scale);
+                    
+                    // Scale up slightly
+                    hoveredMesh.scale.set(1.1, 1.1, 1.1);
+                    hoveredMesh.material.emissiveIntensity += 0.3;
+                    
+                    // Show Tooltip
+                    const data = hoveredMesh.userData;
+                    let tipHtml = `<strong>${data.id}</strong><br/>Type: ${data.type.toUpperCase()}<br/>Status: ${data.status}`;
+                    if(data.util) tipHtml += `<br/>Utilization: ${data.util}`;
+                    if(data.rate) tipHtml += `<br/>Rate: ${data.rate}`;
+                    
+                    tooltip.innerHTML = tipHtml;
+                    tooltip.style.opacity = 1;
+                }
+            } else {
+                if (hoveredMesh) {
+                    hoveredMesh.scale.copy(originalScale);
+                    hoveredMesh.material.emissiveIntensity -= 0.3;
+                    hoveredMesh = null;
+                    tooltip.style.opacity = 0;
+                }
+            }
+
+            // Render using composer for post processing
+            composer.render();
+        }
+        animate();
+
+        // Handle Window Resize
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            composer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>

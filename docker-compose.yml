@@ -1,0 +1,69 @@
+version: '3.8'
+
+services:
+  streamlit:
+    build: .
+    ports:
+      - "8501:8501"
+    environment:
+      - PROMETHEUS_URL=http://prometheus:9090
+      - MCP_URL=http://mcp-server:8080
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+    depends_on:
+      - prometheus
+      - mcp-server
+    networks:
+      - fabric-net
+
+  gnmi-poller:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["python", "gnmi_poller.py"]
+    ports:
+      - "8000:8000"
+    networks:
+      - fabric-net
+
+  mcp-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["python", "mcp_server.py"]
+    ports:
+      - "8080:8080"
+    environment:
+      - PROMETHEUS_URL=http://prometheus:9090
+    depends_on:
+      - prometheus
+    networks:
+      - fabric-net
+
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+    networks:
+      - fabric-net
+
+  grafana:
+    image: grafana/grafana:latest
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning
+      - ./grafana/dashboards:/var/lib/grafana/dashboards
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+    networks:
+      - fabric-net
+
+networks:
+  fabric-net:
+    driver: bridge

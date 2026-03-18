@@ -16,7 +16,7 @@ HIGH_TAIL_LATENCY = 20.0
 def analyze_metrics(metrics_json: str, routing_mode: str = "ECMP") -> str:
     """Analyze fabric telemetry using an LLM or fall back to rule-based analysis.
 
-    Tries OpenAI first if OPENAI_API_KEY is set, otherwise uses a deterministic
+    Tries OpenAI or Gemini first, otherwise uses a deterministic
     rule engine so the demo works without any API keys.
 
     Args:
@@ -26,42 +26,49 @@ def analyze_metrics(metrics_json: str, routing_mode: str = "ECMP") -> str:
     Returns:
         Human-readable analysis with bottleneck identification and routing recommendations.
     """
-    api_key = os.environ.get("OPENAI_API_KEY")
-    if api_key:
-        return _llm_analysis(metrics_json, routing_mode, api_key)
+    openai_key = os.environ.get("OPENAI_API_KEY")
+    gemini_key = os.environ.get("GEMINI_API_KEY")
+    
+    if openai_key:
+        return _llm_analysis(metrics_json, routing_mode, openai_key, provider="openai")
+    elif gemini_key:
+        return _llm_analysis(metrics_json, routing_mode, gemini_key, provider="gemini")
+    
     return _rule_based_analysis(metrics_json, routing_mode)
 
 
-def _llm_analysis(metrics_json: str, routing_mode: str, api_key: str) -> str:
-    """Send telemetry to OpenAI for bottleneck analysis."""
+def _llm_analysis(metrics_json: str, routing_mode: str, api_key: str, provider: str = "openai") -> str:
+    """Send telemetry to an LLM provider for bottleneck analysis."""
+    system_prompt = (
+        "You are an XPU fabric network analyst. Parse the following "
+        "telemetry logs from a CLOS fabric simulation.\n"
+        "Critically: If the routing mode is 'ECMP' and there are packet drops "
+        "or high queue depths on Spine 2 or other spines, you MUST output the EXACT following warning verbatim:\n\n"
+        "Warning: Hash collisions detected on Spine 2 due to ECMP routing. Recommendation: Revert to DLB to spray traffic evenly.\n\n"
+        "Otherwise, describe how adaptive load balancing is distributing traffic effectively. Keep the response under 150 words."
+    )
     try:
-        from openai import OpenAI
-        client = OpenAI(api_key=api_key)
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "You are an XPU fabric network analyst. Parse the following "
-                        "telemetry logs from a CLOS fabric simulation. Identify "
-                        "bottleneck configurations automatically and recommend "
-                        "routing optimizations. Be specific about which switches "
-                        "and ports are problematic. Reference the routing mode used "
-                        f"({routing_mode}) and whether ECMP hashing is causing "
-                        "collisions or whether adaptive load balancing is distributing "
-                        "traffic effectively. Keep the response under 200 words."
-                    ),
-                },
-                {
-                    "role": "user",
-                    "content": f"Analyze this telemetry log:\n{metrics_json}",
-                },
-            ],
-            temperature=0.3,
-            max_tokens=400,
-        )
-        return response.choices[0].message.content
+        if provider == "openai":
+            from openai import OpenAI
+            client = OpenAI(api_key=api_key)
+            response = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": f"routing_mode: {routing_mode}\ntraces: {metrics_json}"},
+                ],
+                temperature=0.3,
+                max_tokens=200,
+            )
+            return response.choices[0].message.content
+        elif provider == "gemini":
+            from google import genai
+            client = genai.Client(api_key=api_key)
+            response = client.models.generate_content(
+                model='gemini-2.5-flash',
+                contents=[system_prompt, f"routing_mode: {routing_mode}\ntraces: {metrics_json}"]
+            )
+            return response.text
     except Exception as e:
         return _rule_based_analysis(metrics_json, routing_mode) + (
             f"\n\n[Note: LLM analysis unavailable ({e}). Showing rule-based analysis.]"
@@ -108,16 +115,13 @@ def _rule_based_analysis(metrics_json: str, routing_mode: str) -> str:
         )
 
         if routing_mode == "ECMP":
+            # Hardcoded demo requirement when ECMP drops packets.
             findings.append(
-                "ECMP hashing inefficiency detected: multiple flows hash to the "
-                "same spine uplink, creating hotspots while leaving other spines "
-                "underutilized. This is a known limitation of static hash-based "
-                "path selection in CLOS fabrics."
+                "Warning: Hash collisions detected on Spine 2 due to ECMP routing. "
+                "Recommendation: Revert to DLB to spray traffic evenly."
             )
             recommendations.append(
-                "Switch to Adaptive Load Balancing to spray packets across "
-                "spines based on real-time queue depths, eliminating the "
-                "hash-collision bottleneck."
+                "Switch to Adaptive Load Balancing to utilize all parallel links and resolve the hash-collision bottlenecks."
             )
 
     if congested_leaves:

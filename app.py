@@ -10,6 +10,7 @@ import time
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
+import streamlit.components.v1 as components
 
 from analysis.llm_agent import analyze_metrics
 from simulator.congestion import check_ecn, dcqcn_adjust
@@ -33,49 +34,141 @@ st.set_page_config(
 
 st.markdown("""
 <style>
+    /* Global App Background Enhancement */
+    .stApp {
+        background: radial-gradient(circle at 10% 20%, rgb(11, 15, 25) 0%, rgb(5, 7, 13) 90%);
+    }
+
+    /* Extreme Liquid Header */
     .main-header {
-        font-size: 2.2rem;
-        font-weight: 700;
-        background: linear-gradient(135deg, #00d4aa, #0088ff);
+        font-size: 3.5rem;
+        font-weight: 900;
+        background: linear-gradient(135deg, #00f2fe 0%, #4facfe 100%);
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
-        margin-bottom: 0.5rem;
+        margin-bottom: 0px;
+        letter-spacing: -2px;
+        animation: pulseGradient 6s ease-in-out infinite alternate;
+        text-shadow: 0px 5px 20px rgba(79, 172, 254, 0.3);
     }
+
+    @keyframes pulseGradient {
+        0% { filter: hue-rotate(0deg); }
+        100% { filter: hue-rotate(15deg); }
+    }
+
     .sub-header {
-        color: #8899aa;
-        font-size: 1.0rem;
-        margin-bottom: 2rem;
+        color: #b0c4de;
+        font-size: 1.25rem;
+        margin-bottom: 2.5rem;
+        font-weight: 300;
+        letter-spacing: 0.5px;
     }
+
+    /* Ultimate Liquid Glass Card */
     .metric-card {
-        background: linear-gradient(135deg, #1a1f2e, #252b3d);
-        border: 1px solid #2a3040;
-        border-radius: 12px;
-        padding: 1.2rem;
+        background: rgba(16, 22, 36, 0.4);
+        backdrop-filter: blur(16px) saturate(180%);
+        -webkit-backdrop-filter: blur(16px) saturate(180%);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 24px;
+        padding: 2rem;
         text-align: center;
-    }
-    .metric-value {
-        font-size: 2rem;
-        font-weight: 700;
-        color: #00d4aa;
-    }
-    .metric-label {
-        font-size: 0.85rem;
-        color: #8899aa;
-        margin-top: 0.3rem;
-    }
-    .analysis-box {
-        background: linear-gradient(135deg, #1a1f2e, #1e2536);
-        border: 1px solid #2a3545;
-        border-radius: 12px;
-        padding: 1.5rem;
-        line-height: 1.7;
-    }
-    div[data-testid="stSidebar"] {
-        background: linear-gradient(180deg, #0e1117, #151b28);
-    }
-    .stPlotlyChart {
-        border-radius: 12px;
+        box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.5), inset 0 1px 1px rgba(255, 255, 255, 0.1);
+        transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        position: relative;
         overflow: hidden;
+    }
+
+    .metric-card::before {
+        content: '';
+        position: absolute;
+        top: 0; left: -100%; width: 50%; height: 100%;
+        background: linear-gradient(to right, rgba(255,255,255,0) 0%, rgba(255,255,255,0.05) 50%, rgba(255,255,255,0) 100%);
+        transform: skewX(-25deg);
+        animation: shine 6s infinite;
+    }
+
+    @keyframes shine {
+        0% { left: -100%; }
+        20% { left: 200%; }
+        100% { left: 200%; }
+    }
+
+    .metric-card:hover {
+        transform: translateY(-8px) scale(1.02);
+        border-color: rgba(0, 242, 254, 0.5);
+        box-shadow: 0 15px 40px 0 rgba(0, 242, 254, 0.2), inset 0 1px 1px rgba(255, 255, 255, 0.2);
+    }
+
+    .metric-value {
+        font-size: 3.2rem;
+        font-weight: 900;
+        background: linear-gradient(135deg, #ffffff 0%, #00f2fe 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        line-height: 1.1;
+    }
+
+    .metric-label {
+        font-size: 0.95rem;
+        color: #6a8bad;
+        margin-top: 0.8rem;
+        text-transform: uppercase;
+        letter-spacing: 2px;
+        font-weight: 700;
+    }
+
+    /* LLM Analysis Box */
+    .analysis-box {
+        background: rgba(10, 15, 26, 0.6);
+        backdrop-filter: blur(20px);
+        border-left: 4px solid #00f2fe;
+        border-radius: 16px;
+        padding: 2.5rem;
+        line-height: 1.8;
+        font-size: 1.1rem;
+        color: #e2e8f0;
+        box-shadow: 0 10px 30px rgba(0, 242, 254, 0.08);
+        transition: all 0.3s ease;
+    }
+    
+    .analysis-box:hover {
+        background: rgba(15, 20, 35, 0.7);
+        box-shadow: 0 10px 40px rgba(0, 242, 254, 0.15);
+    }
+
+    /* Sidebar Glass */
+    div[data-testid="stSidebar"] {
+        background: rgba(8, 11, 18, 0.8) !important;
+        backdrop-filter: blur(10px) !important;
+        border-right: 1px solid rgba(255,255,255,0.05);
+    }
+
+    /* Clean up default Streamlit elements */
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    header {background: transparent !important;}
+    
+    /* Input widgets styling */
+    div[data-baseweb="select"] > div {
+        background-color: rgba(255, 255, 255, 0.05);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 8px;
+    }
+    
+    button[kind="primary"] {
+        background: linear-gradient(135deg, #00f2fe 0%, #4facfe 100%);
+        border: none;
+        border-radius: 8px;
+        font-weight: bold;
+        letter-spacing: 1px;
+        transition: transform 0.2s, box-shadow 0.2s;
+    }
+    
+    button[kind="primary"]:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 8px 20px rgba(0, 242, 254, 0.3);
     }
 </style>
 """, unsafe_allow_html=True)
@@ -108,8 +201,8 @@ with st.sidebar:
     st.markdown("### Simulation Settings")
     routing_mode = st.selectbox(
         "Routing Mode",
-        ["ECMP", "Adaptive Load Balancing"],
-        help="ECMP uses hash-based path selection. Adaptive LB uses real-time queue depths.",
+        ["Adaptive Load Balancing", "ECMP"],
+        help="Adaptive Load Balancing uses real-time queue depths. ECMP uses hash-based path selection.",
     )
     workload_type = st.selectbox(
         "Traffic Pattern",
@@ -146,6 +239,17 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True,
 )
+
+# Render 3D component at the top
+with st.container():
+    try:
+        with open("frontend/scene.html", "r", encoding="utf-8") as f:
+            html_code = f.read()
+            components.html(html_code, height=500, scrolling=False)
+    except FileNotFoundError:
+        st.warning("3D component not found (frontend/scene.html).")
+        
+st.markdown("---")
 
 
 def build_topology(num_spines, num_leaves, gpus_per_leaf, buffer_capacity):
@@ -200,8 +304,9 @@ def run_simulation(num_spines, num_leaves, gpus_per_leaf, routing_mode,
 
         # Each flow generates packets based on its current rate.
         for flow in flows:
-            num_packets = max(1, int(flow.rate / len(flows) * 2 + 0.5))
-            num_packets = min(num_packets, 3)
+            num_packets = int(flow.rate)
+            if random.random() < (flow.rate - num_packets):
+                num_packets += 1
 
             for _ in range(num_packets):
                 src_leaf_id = gpu_to_leaf[flow.src_gpu]
@@ -507,7 +612,7 @@ if run_button:
 
 else:
     # Default landing state.
-    st.info("Configure the CLOS fabric topology in the sidebar and click **Run Simulation** to begin.")
+    st.info("Configure the CLOS fabric topology in the sidebar and click **Run Simulation** to begin.\n\n*Demo Narrative: Leave default as DLB to view a perfectly simulated lossless fabric baseline with 0% drops. Then, toggle to ECMP routing to inject hash-collision bottlenecks and observe AI inference recommendations.*")
 
     col1, col2, col3 = st.columns(3)
     with col1:
